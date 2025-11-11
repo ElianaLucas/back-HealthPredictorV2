@@ -1,7 +1,7 @@
 # app/data_generator.py
 import numpy as np
 from sqlalchemy.orm import Session
-from models import SyntheticData
+from app.models import SyntheticData
 import logging
 
 logger = logging.getLogger(__name__)

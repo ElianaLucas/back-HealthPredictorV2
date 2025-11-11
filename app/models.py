@@ -1,21 +1,24 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, JSON, func
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-from database import Base
+from .database import Base  # <- IMPORT RELATIVO CORRECTO
 import uuid
+from pathlib import Path
+
+CSV_PATH = Path(__file__).parent / "synthetic_data_full.csv"
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_number = Column(Integer, autoincrement=True, unique=True, nullable=False)  # ID legible
+    user_number = Column(Integer, autoincrement=True, unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False)
     is_active = Column(Boolean, default=True)
-    # Relaciones
+
     patient_records = relationship("PatientRecord", back_populates="user", cascade="all, delete-orphan")
     predictions = relationship("Prediction", back_populates="user", cascade="all, delete-orphan")
 
@@ -27,8 +30,8 @@ class PatientRecord(Base):
 
     age = Column(Integer, nullable=False)
     gender = Column(String(10), nullable=False)
-    height = Column(Float, nullable=False)
-    weight = Column(Float, nullable=False)
+    height = Column(Float, nullable=True)
+    weight = Column(Float, nullable=True)
     bmi = Column(Float, nullable=False)
 
     systolic_bp = Column(Float, nullable=False)
@@ -54,7 +57,6 @@ class PatientRecord(Base):
     current_medications = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Relaciones
     user = relationship("User", back_populates="patient_records")
     predictions = relationship("Prediction", back_populates="patient_record", cascade="all, delete-orphan")
 
@@ -77,7 +79,6 @@ class Prediction(Base):
     recommendations = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Relaciones
     user = relationship("User", back_populates="predictions")
     patient_record = relationship("PatientRecord", back_populates="predictions")
 
@@ -88,8 +89,9 @@ class SyntheticData(Base):
 
     age = Column(Integer, nullable=False)
     gender = Column(String(10), nullable=False)
-    height = Column(Float, nullable=False)
-    weight = Column(Float, nullable=False)
+    height = Column(Float, nullable=True)
+    weight = Column(Float, nullable=True)
+
     bmi = Column(Float, nullable=False)
 
     systolic_bp = Column(Float, nullable=False)

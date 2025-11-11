@@ -7,8 +7,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import os
 from passlib.context import CryptContext
-from database import get_db
-from models import User
+from app.database import get_db
+from app.models import User
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key')
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
