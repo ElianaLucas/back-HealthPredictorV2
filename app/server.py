@@ -1,8 +1,10 @@
 # app/server.py
+#venv\Scripts\uvicorn app.server:app --host 0.0.0.0 --port 8000 --reload
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from pydantic import BaseModel, EmailStr, Field, constr
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -14,7 +16,7 @@ from uuid import uuid4
 
 # Imports absolutos del proyecto (corregidos)
 from app.models import User, PatientRecord, Prediction
-from app.database import Base, engine, get_db
+from app.database import Base, engine, get_db, ensure_predictions_schema
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from app.data_generator import generate_synthetic_data
 from app.ml_models import train_all_models, predict_risks
@@ -25,6 +27,10 @@ ROOT_DIR = Path(__file__).parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 Base.metadata.create_all(bind=engine)
+try:
+    ensure_predictions_schema()
+except Exception:
+    pass
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -107,6 +113,56 @@ class PatientRecordResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class PredictionWithUserResponse(BaseModel):
+    id: str
+    user_id: str
+    patient_record_id: str
+    overall_risk: str
+    created_at: datetime
+    patient_name: Optional[str] = None
+    patient_email: Optional[EmailStr] = None
+    role: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class PatientRecordWithUser(BaseModel):
+    id: str
+    user_id: str
+    age: int
+    gender: str
+    bmi: float
+    systolic_bp: float
+    diastolic_bp: float
+    heart_rate: float
+    glucose: float
+    cholesterol_total: float
+    cholesterol_hdl: float
+    cholesterol_ldl: float
+    triglycerides: float
+    smoking: bool
+    alcohol_consumption: str
+    exercise_hours_per_week: float
+    stress_level: int
+    sleep_hours: float
+    family_history_diabetes: bool
+    family_history_hypertension: bool
+    family_history_heart_disease: bool
+    created_at: datetime
+    user_number: Optional[int] = None
+    full_name: Optional[str] = None
+    is_active: Optional[bool] = None
+    role: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class PredictionResponse(BaseModel):
     id: str
     patient_record_id: str
@@ -117,6 +173,13 @@ class PredictionResponse(BaseModel):
     obesity_risk: float
     dyslipidemia_risk: float
     metabolic_syndrome_risk: float
+    epoc_risk: float
+    arthritis_risk: float
+    hepatopathy_risk: float
+    parkinson_risk: float
+    heart_failure_risk: float
+    alzheimer_risk: float
+    cancer_risk: float
     overall_risk: str
     recommendations: Optional[Dict[str, Any]]
     created_at: datetime
@@ -233,6 +296,13 @@ def _create_and_store_prediction(db: Session, user_id: str, patient_record_id: s
             obesity_risk=float(risks.get("obesity_risk", 0.0)),
             dyslipidemia_risk=float(risks.get("dyslipidemia_risk", 0.0)),
             metabolic_syndrome_risk=float(risks.get("metabolic_syndrome_risk", 0.0)),
+            epoc_risk=float(risks.get("epoc_risk", 0.0)),
+            arthritis_risk=float(risks.get("arthritis_risk", 0.0)),
+            hepatopathy_risk=float(risks.get("hepatopathy_risk", 0.0)),
+            parkinson_risk=float(risks.get("parkinson_risk", 0.0)),
+            heart_failure_risk=float(risks.get("heart_failure_risk", 0.0)),
+            alzheimer_risk=float(risks.get("alzheimer_risk", 0.0)),
+            cancer_risk=float(risks.get("cancer_risk", 0.0)),
             overall_risk=overall_risk,
             recommendations=recommendations
         )
@@ -307,20 +377,116 @@ async def create_patient_record(record_data: PatientRecordCreate, current_user: 
     return patient_record
 
 @api_router.get("/patient-records", response_model=List[PatientRecordResponse])
-async def get_patient_records(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    records = db.query(PatientRecord).filter(PatientRecord.user_id == current_user.id).order_by(PatientRecord.created_at.desc()).all()
+async def get_patient_records(
+    owner_roles: Optional[str] = None,
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role in ("admin", "medico"):
+        query = db.query(PatientRecord)
+        if owner_roles:
+            roles = [r.strip() for r in owner_roles.split(',') if r.strip()]
+            if roles:
+                query = query.join(User, PatientRecord.user_id == User.id).filter(User.role.in_(roles))
+        if user_id:
+            query = query.filter(PatientRecord.user_id == user_id)
+        records = query.order_by(PatientRecord.created_at.desc()).all()
+    else:
+        records = db.query(PatientRecord) \
+            .filter(PatientRecord.user_id == current_user.id) \
+            .order_by(PatientRecord.created_at.desc()).all()
     return records
+
+@api_router.get("/patient-records/count")
+async def get_patient_records_count(
+    owner_roles: Optional[str] = None,
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role in ("admin", "medico"):
+        q = db.query(PatientRecord)
+        if owner_roles:
+            roles = [r.strip() for r in owner_roles.split(',') if r.strip()]
+            if roles:
+                q = q.join(User, PatientRecord.user_id == User.id).filter(User.role.in_(roles))
+        if user_id:
+            q = q.filter(PatientRecord.user_id == user_id)
+        count = q.count()
+    else:
+        count = db.query(PatientRecord).filter(PatientRecord.user_id == current_user.id).count()
+    return {"count": count}
 
 @api_router.get("/patient-records/{record_id}", response_model=PatientRecordResponse)
 async def get_patient_record(record_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    record = db.query(PatientRecord).filter(PatientRecord.id == record_id, PatientRecord.user_id == current_user.id).first()
+    if current_user.role in ("admin", "medico"):
+        record = db.query(PatientRecord).filter(PatientRecord.id == record_id).first()
+    else:
+        record = db.query(PatientRecord).filter(PatientRecord.id == record_id, PatientRecord.user_id == current_user.id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return record
 
+@api_router.get("/patient-records/with-user", response_model=List[PatientRecordWithUser])
+async def get_patient_records_with_user(
+    owner_roles: Optional[str] = None,
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    q = db.query(PatientRecord, User).join(User, PatientRecord.user_id == User.id)
+
+    if current_user.role in ("admin", "medico"):
+        if owner_roles:
+            roles = [r.strip() for r in owner_roles.split(",") if r.strip()]
+            if roles:
+                q = q.filter(User.role.in_(roles))
+        if user_id:
+            q = q.filter(PatientRecord.user_id == user_id)
+    else:
+        q = q.filter(PatientRecord.user_id == current_user.id)
+
+    rows = q.order_by(desc(PatientRecord.created_at)).all()
+
+    result: List[PatientRecordWithUser] = []
+    for pr, u in rows:
+        result.append(PatientRecordWithUser(
+            id=pr.id,
+            user_id=pr.user_id,
+            age=pr.age,
+            gender=pr.gender,
+            bmi=pr.bmi,
+            systolic_bp=pr.systolic_bp,
+            diastolic_bp=pr.diastolic_bp,
+            heart_rate=pr.heart_rate,
+            glucose=pr.glucose,
+            cholesterol_total=pr.cholesterol_total,
+            cholesterol_hdl=pr.cholesterol_hdl,
+            cholesterol_ldl=pr.cholesterol_ldl,
+            triglycerides=pr.triglycerides,
+            smoking=pr.smoking,
+            alcohol_consumption=pr.alcohol_consumption,
+            exercise_hours_per_week=pr.exercise_hours_per_week,
+            stress_level=pr.stress_level,
+            sleep_hours=pr.sleep_hours,
+            family_history_diabetes=pr.family_history_diabetes,
+            family_history_hypertension=pr.family_history_hypertension,
+            family_history_heart_disease=pr.family_history_heart_disease,
+            created_at=pr.created_at,
+            user_number=getattr(u, "user_number", None),
+            full_name=getattr(u, "full_name", None),
+            is_active=getattr(u, "is_active", None),
+            role=getattr(u, "role", None),
+        ))
+    return result
+
 @api_router.post("/predictions/{record_id}", response_model=PredictionResponse)
 async def create_prediction(record_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    patient_record = db.query(PatientRecord).filter(PatientRecord.id == record_id, PatientRecord.user_id == current_user.id).first()
+    if current_user.role in ("admin", "medico"):
+        patient_record = db.query(PatientRecord).filter(PatientRecord.id == record_id).first()
+    else:
+        patient_record = db.query(PatientRecord).filter(PatientRecord.id == record_id, PatientRecord.user_id == current_user.id).first()
     if not patient_record:
         raise HTTPException(status_code=404, detail="Patient record not found")
 
@@ -357,16 +523,66 @@ async def create_prediction(record_id: str, current_user: User = Depends(get_cur
     return prediction
 
 @api_router.get("/predictions", response_model=List[PredictionResponse])
-async def get_predictions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    predictions = db.query(Prediction).filter(Prediction.user_id == current_user.id).order_by(Prediction.created_at.desc()).all()
+async def get_predictions(
+    user_id: Optional[str] = None,
+    record_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role in ("admin", "medico"):
+        q = db.query(Prediction)
+        if user_id:
+            q = q.filter(Prediction.user_id == user_id)
+        if record_id:
+            q = q.filter(Prediction.patient_record_id == record_id)
+        predictions = q.order_by(Prediction.created_at.desc()).all()
+    else:
+        predictions = db.query(Prediction) \
+            .filter(Prediction.user_id == current_user.id) \
+            .order_by(Prediction.created_at.desc()).all()
     return predictions
 
 @api_router.get("/predictions/{prediction_id}", response_model=PredictionResponse)
 async def get_prediction(prediction_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    prediction = db.query(Prediction).filter(Prediction.id == prediction_id, Prediction.user_id == current_user.id).first()
+    if current_user.role in ("admin", "medico"):
+        prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+    else:
+        prediction = db.query(Prediction).filter(Prediction.id == prediction_id, Prediction.user_id == current_user.id).first()
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
     return prediction
+
+@api_router.get("/predictions/with-user", response_model=List[PredictionWithUserResponse])
+async def get_predictions_with_user(
+    user_id: Optional[str] = None,
+    record_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    q = db.query(Prediction, User).join(User, Prediction.user_id == User.id)
+    if current_user.role in ("admin", "medico"):
+        if user_id:
+            q = q.filter(Prediction.user_id == user_id)
+        if record_id:
+            q = q.filter(Prediction.patient_record_id == record_id)
+    else:
+        q = q.filter(Prediction.user_id == current_user.id)
+    rows = q.order_by(desc(Prediction.created_at)).all()
+
+    out: List[PredictionWithUserResponse] = []
+    for p, u in rows:
+        out.append(PredictionWithUserResponse(
+            id=p.id,
+            user_id=p.user_id,
+            patient_record_id=p.patient_record_id,
+            overall_risk=p.overall_risk,
+            created_at=p.created_at,
+            patient_name=getattr(u, "full_name", None),
+            patient_email=getattr(u, "email", None),
+            role=getattr(u, "role", None),
+        ))
+    return out
+
 
 @api_router.post("/data/generate")
 async def generate_data(num_samples: int = 10000, db: Session = Depends(get_db)):
@@ -388,13 +604,87 @@ async def train_models(db: Session = Depends(get_db)):
 
 @api_router.get("/reports/pdf/{prediction_id}")
 async def get_pdf_report(prediction_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    prediction = db.query(Prediction).filter(Prediction.id == prediction_id, Prediction.user_id == current_user.id).first()
+    if current_user.role in ("admin", "medico"):
+        prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+    else:
+        prediction = db.query(Prediction).filter(Prediction.id == prediction_id, Prediction.user_id == current_user.id).first()
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
     patient_record = db.query(PatientRecord).filter(PatientRecord.id == prediction.patient_record_id).first()
     user = current_user
     pdf_path = generate_pdf_report(user, patient_record, prediction)
     return FileResponse(path=pdf_path, filename=os.path.basename(pdf_path), media_type="application/pdf")
+
+@api_router.get("/users")
+async def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(User)
+    if current_user.role not in ("admin", "medico"):
+        q = q.filter(User.id == current_user.id)
+    # Order by existing field (user_number) desc to approximate recency
+    users = q.order_by(desc(User.user_number)).all()
+    out = []
+    for u in users:
+        out.append({
+            "id": u.id,
+            "email": u.email,
+            "full_name": getattr(u, "full_name", None),
+            "role": getattr(u, "role", None),
+            "role_id": getattr(u, "role_id", None),
+            "is_active": getattr(u, "is_active", None),
+            "user_number": getattr(u, "user_number", None),
+            "created_at": getattr(u, "created_at", None),
+        })
+    return out
+
+@api_router.get("/users/count")
+async def users_count(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role in ("admin", "medico"):
+        count = db.query(User).count()
+    else:
+        count = 1
+    return {"count": count}
+
+@api_router.patch("/users/{user_id}")
+async def update_user(user_id: str, payload: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role not in ("admin", "medico"):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Actualizar campos si se proporcionan
+    if payload.full_name is not None:
+        user.full_name = payload.full_name
+    
+    if payload.email is not None:
+        # Verificar que el email no esté en uso por otro usuario
+        existing_user = db.query(User).filter(User.email == payload.email, User.id != user_id).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already in use")
+        user.email = payload.email
+    
+    if payload.role_id is not None:
+        # Verificar que el role_id exista
+        if payload.role_id not in [1, 2, 3]:
+            raise HTTPException(status_code=400, detail="Invalid role_id. Must be 1 (paciente), 2 (medico), or 3 (admin)")
+        user.role_id = payload.role_id
+    
+    if payload.is_active is not None:
+        user.is_active = bool(payload.is_active)
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "id": user.id,
+        "user_number": getattr(user, "user_number", None),
+        "full_name": getattr(user, "full_name", None),
+        "email": getattr(user, "email", None),
+        "is_active": user.is_active,
+        "role": getattr(user, "role", None),
+        "role_id": getattr(user, "role_id", None),
+        "created_at": getattr(user, "created_at", None),
+    }
 
 # include router and shutdown
 app.include_router(api_router)

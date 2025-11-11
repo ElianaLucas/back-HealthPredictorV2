@@ -74,6 +74,13 @@ class Prediction(Base):
     obesity_risk = Column(Float, nullable=False)
     dyslipidemia_risk = Column(Float, nullable=False)
     metabolic_syndrome_risk = Column(Float, nullable=False)
+    epoc_risk = Column(Float, nullable=False)
+    arthritis_risk = Column(Float, nullable=False)
+    hepatopathy_risk = Column(Float, nullable=False)
+    parkinson_risk = Column(Float, nullable=False)
+    heart_failure_risk = Column(Float, nullable=False)
+    alzheimer_risk = Column(Float, nullable=False)
+    cancer_risk = Column(Float, nullable=False)
 
     overall_risk = Column(String(20), nullable=False)
     recommendations = Column(JSON, nullable=True)

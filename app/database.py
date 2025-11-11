@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 # Cargar variables de entorno desde .env
 load_dotenv()  # Busca automáticamente .env en el root del proyecto
@@ -37,3 +38,37 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def ensure_predictions_schema():
+    try:
+        with engine.connect() as conn:
+            cols = set()
+            q = text(
+                """
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'predictions'
+                """
+            )
+            res = conn.execute(q, {"db": MYSQL_DATABASE})
+            for row in res:
+                cols.add(row[0])
+
+            desired = [
+                ("epoc_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("arthritis_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("hepatopathy_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("parkinson_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("heart_failure_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("alzheimer_risk", "FLOAT NOT NULL DEFAULT 0"),
+                ("cancer_risk", "FLOAT NOT NULL DEFAULT 0"),
+            ]
+
+            for name, type_sql in desired:
+                if name not in cols:
+                    try:
+                        conn.execute(text(f"ALTER TABLE predictions ADD COLUMN {name} {type_sql}"))
+                    except Exception:
+                        pass
+            conn.commit()
+    except Exception:
+        pass
